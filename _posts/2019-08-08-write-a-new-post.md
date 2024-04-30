@@ -14,7 +14,7 @@ render_with_liquid: false
 ![](https://velog.velcdn.com/images/sgn07124/post/16387411-6a55-4dca-877b-763132440180/image.png)
 <figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
     JWT 인증 과정
-</figcaption>
+</figcaption> 
 
 1. 사용자는 URL: /auth/login으로 email과 password로 로그인 요청을 합니다.
 2. 서버에서 Spring Security는 사용자를 인증하고 AccessToken과 RefreshToken을 발급해서 반환합니다. 토큰 발급 후 이메일:RefreshToken을 Redis에 보관됩니다.

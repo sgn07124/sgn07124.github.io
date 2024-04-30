@@ -1,13 +1,23 @@
 ---
-title: Text and Typography
-description: Examples of text, typography, math equations, diagrams, flowcharts, pictures, videos, and more.
-author: cotes
+# 글 제목
+title: 게시글 작성 틀
+# 간단한 설명
+description: Chirpy테마 게시글 작성 틀로 YYYY-MM-DD-TITLE.EXTENSION 의 형식으로 새 파일을 만들어주고 _post/ 폴더에 넣어준다. EXTENSION은 md 혹은 markdown으로 해주어야한다.
+# 작성자
+author: 
+# 작성일자
 date: 2019-08-08 11:33:00 +0800
-categories: [Blogging, Demo]
-tags: [typography]
-pin: true
-math: true
+# 카테고리 대주제 > 소주제
+categories: [Blogging, Tutorial]
+# 태그
+tags: [guide]
+# 메인화면에 고정
+pin: false
+# 웹페이지의 성능적인 이유에서 mathematical 기능은 기본적으로 꺼져있음.
+math: false
+# 표 생성 도구로 true로 설정 시, ```mermaid 를 사용할 수 있다.
 mermaid: true
+# 포스트의 최상단에 아래와 같이 url을 추가하여 이미지를 넣을 수 있다:
 image:
   path: /commons/devices-mockup.png
   lqip: data:image/webp;base64,UklGRpoAAABXRUJQVlA4WAoAAAAQAAAADwAABwAAQUxQSDIAAAARL0AmbZurmr57yyIiqE8oiG0bejIYEQTgqiDA9vqnsUSI6H+oAERp2HZ65qP/VIAWAFZQOCBCAAAA8AEAnQEqEAAIAAVAfCWkAALp8sF8rgRgAP7o9FDvMCkMde9PK7euH5M1m6VWoDXf2FkP3BqV0ZYbO6NA/VFIAAAA

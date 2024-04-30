@@ -1,538 +1,509 @@
 ---
-title: Writing a New Post
-author: cotes
-date: 2019-08-08 14:10:00 +0800
-categories: [Blogging, Tutorial]
-tags: [writing]
+title: JWT 로그인 + Redis (1)
+author: 
+date: 2024-03-15 14:10:00 +0800
+categories: [Spring&Springboot, Spring Security]
+tags: [spring, java]
 render_with_liquid: false
 ---
 
-This tutorial will guide you how to write a post in the _Chirpy_ template, and it's worth reading even if you've used Jekyll before, as many features require specific variables to be set.
+로그인 기능은 거의 대부분의 애플리케이션에서 사용하고 있습니다.. 로그인 방식으로는 여러 방식들이 있지만 가장 많이 사용하는 방식을 한 번 사용해보고자 하여 JWT를 사용하여 프로젝트를 진행해보았습니다. 해당 블로그의 로그인 방식(JWT 생성 및 인증) 부분의 내용은 블로그 하단의 출처의 블로그를 공부하며 프로젝트에 적용하였습니다. (로그인 부분의 코드는 spring security + JWT + JPA + Redis로 구성되어 있고 JWT의 AccessToken으로 조회한 회원 이메일과 RefreshToken을 key:value로 redis에 저장하는 방법을 적용했습니다. 이 외의 전체적인 코드는 MySQL과 MongoDB를 사용하였습니다.)
 
-## Naming and Path
+### Security + JWT의 기본 동작 원리
 
-Create a new file named `YYYY-MM-DD-TITLE.EXTENSION`{: .filepath} and put it in the `_posts`{: .filepath} of the root directory. Please note that the `EXTENSION`{: .filepath} must be one of `md`{: .filepath} and `markdown`{: .filepath}. If you want to save time of creating files, please consider using the plugin [`Jekyll-Compose`](https://github.com/jekyll/jekyll-compose) to accomplish this.
+![](https://velog.velcdn.com/images/sgn07124/post/16387411-6a55-4dca-877b-763132440180/image.png)
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    JWT 인증 과정
+</figcaption>
 
-## Front Matter
+1. 사용자는 URL: /auth/login으로 email과 password로 로그인 요청을 합니다.
+2. 서버에서 Spring Security는 사용자를 인증하고 AccessToken과 RefreshToken을 발급해서 반환합니다. 토큰 발급 후 이메일:RefreshToken을 Redis에 보관됩니다.
+3. 사용자는 일반 요청을 할 때마다 AccessToken을 함께 요청합니다.
+4. 서버는 AccessToken을 검증하고 통과하면 응답을 보냅니다.
+5. 만약 사용자가 일반 요청을 했을 때, AccessToken이 만료된 경우, 서버는 AccessToken 검증을 마친 후 재발행 요청을 합니다.
+6. 사용자는 만료된 AccessToken과 유효한 RefreshToken을 함께 URL: /auth/reissue로 재발행 요청을 합니다.
+7. 서버는 RefreshToken을 검증하고 AccessToken과 RefreshToken을 재발행하여 사용자에게 반환합니다. 이때, 서버는 만료된 AccessToken에서 조회한 이메일로 Redis의 키값인 이메일과 매칭하여 RefreshToken을 조회하고 조회한 RefreshToken과 사용자가 요청할 때 보낸 RefreshToken과 비교하여 일치하는 경우 새로운 AccessToken과 RefreshToken을 발급하여 사용자에게 반환하고 RefreshToken은 Redis에 다시 저장합니다.
 
-Basically, you need to fill the [Front Matter](https://jekyllrb.com/docs/front-matter/) as below at the top of the post:
+### 코드 구조 및 상세 설명
 
-```yaml
----
-title: TITLE
-date: YYYY-MM-DD HH:MM:SS +/-TTTT
-categories: [TOP_CATEGORIE, SUB_CATEGORIE]
-tags: [TAG]     # TAG names should always be lowercase
----
+
+```java
+public ResponseEntity<?> login(UserLoginRequestDto login) {
+        if (userRepository.findById(login.getMemberId()).orElse(null) == null) {
+            return response.fail("해당하는 유저가 존재하지 않습니다.", HttpStatus.BAD_REQUEST);
+        }
+
+        // 1. Login Email/PW 를 기반으로 Authentication 객체 생성
+        // 이때 authentication 는 인증 여부를 확인하는 authenticated 값이 false
+        UsernamePasswordAuthenticationToken authenticationToken = login.toAuthentication();
+
+        // 2. 실제 검증 (사용자 비밀번호 체크)이 이루어지는 부분
+        // authenticate 매서드가 실행될 때 CustomUserDetailsService 에서 만든 loadUserByUsername 메서드가 실행
+        Authentication authentication = authenticationManagerBuilder.getObject().authenticate(authenticationToken);
+
+        // 3. 인증 정보를 기반으로 JWT 토큰 생성
+        TokenDto tokenDto = jwtTokenProvider.generateToken(authentication);
+
+        // 4. RefreshToken Redis 저장 (expirationTime 설정을 통해 자동 삭제 처리)
+        redisTemplate.opsForValue()
+                .set("RT:" + authentication.getName(), tokenDto.getRefreshToken(), tokenDto.getRefreshTokenExpirationTime(), TimeUnit.MILLISECONDS);
+
+        return response.success(tokenDto, "로그인에 성공했습니다.", HttpStatus.OK);
+    }
 ```
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    UserService
+</figcaption>
 
-> The posts' _layout_ has been set to `post` by default, so there is no need to add the variable _layout_ in the Front Matter block.
-{: .prompt-tip }
+클라이언트가 /auth/login 요청을 했을 때, Controller를 통해 들어오는 Service단의 login 메서드입니다.
 
-### Timezone of Date
+1. Login 요청으로 들어온 Email, Password을 기반으로 Authentication 객체를 생성합니다. 
+2. authenticate() 메서드를 통해 요청된 사용자에 대한 검증이 진행됩니다.
+3. 2번에서 검증이 정상적으로 통과되었다면 인증된 authentication 객체를 기반으로 JWT 토큰을 생성합니다. 
+4. Redis에 authentication에서 가져온 이메일, RefreshToken을 저장합니다. expirationTime을 RefreshToken의 만료 시간과 동일하게 설정하여 토큰 만료 시 자동으로 삭제되도록 처리합니다.
 
-In order to accurately record the release date of a post, you should not only set up the `timezone` of `_config.yml`{: .filepath} but also provide the post's timezone in variable `date` of its Front Matter block. Format: `+/-TTTT`, e.g. `+0800`.
+#### 첫 번째 과정 - Login Email/Password를 기반으로 Authentication 객체 생성
 
-### Categories and Tags
+![](https://velog.velcdn.com/images/sgn07124/post/ac4d04d2-0816-40fc-8926-c45668a5cb6a/image.png)
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    UsernamePasswordAuthenticationToken
+</figcaption>
 
-The `categories` of each post are designed to contain up to two elements, and the number of elements in `tags` can be zero to infinity. For instance:
+첫 번째는 ID와 Password 기반으로 객체를 생성하는 과정입니다.
+UsernamePasswordAuthenticationToken 클래스를 보면 두 개의 생성자가 있으며 principal과 credentials를 인자로 받는 생성자를 통한 객체가 생성됩니다.
+이때, authenticated 값은 false(기본값)로 해당 Authentication은 아직 인증되지 않았으며, 인증을 위해 만들어진 객체가 됩니다. 이후의 과정에서 이렇게 만들어진 Authentication 객체를 사용하여 실제 인증이 진행됩니다.
 
-```yaml
----
-categories: [Animal, Insect]
-tags: [bee]
----
+#### 두 번째 과정 - 실제 검증이 이루어지는 과정
+
+![](https://velog.velcdn.com/images/sgn07124/post/914af3d0-7cdf-4073-89be-468a60771696/image.png)
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    authenticated()
+</figcaption>
+
+두 번째는 실제 검증이 이루어지는 부분으로 사용자의 비밀번호를 확인 후 통과 하면 authenticated 값이 true로 변경됩니다.
+
+![](https://velog.velcdn.com/images/sgn07124/post/8d9a3118-c790-4470-9f32-005f0c39b10f/image.png)
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    ProviderManager
+</figcaption>
+
+ProviderManager 클래스의 authenticate() 메서드입니다.
+해당 메서드의 동작 과정을 보면 모든 Providers들을 for문으로 반복하며 provider가 해당 인증을 할 수 있는지 여부를 supports 메서드로 확인합니다. 그리고 인증을 할 수 있는 provider를 발견하면 해당 provider의 authenticate() 메서드를 통해 인증을 진행합니다.
+
+![](https://velog.velcdn.com/images/sgn07124/post/fc34ed98-df8b-4740-aa53-f1cc39b84ef0/image.png)
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    AbstractUserDetailsAuthenticationProvider.class
+</figcaption>
+
+위 과정인 ProviderManager 클래스의 authenticate() 메서드에서 해당 인증을 처리할 수 있도록 provider를 통해 인증을 진행한다고 했습니다. 위 과정에서 해당 인증을 처리할 수 있는 provider로 결정된 클래스가 AbstractUserDetailsAuthenticationProvider.class입니다.
+결국 해당 클래스의 authenticate() 메서드를 통해 인증이 진행됩니다.
+위 코드의 retrieveUser() 메서드는 DaoAuthenticationProvider.class에 구현되어 있습니다.
+
+![](https://velog.velcdn.com/images/sgn07124/post/df27f2d3-2d1f-4ac7-a4d0-ab217da58a93/image.png)
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    DaoAuthenticationProvider.class
+</figcaption>
+
+여기서 loadUserByUsername() 메서드는 직접 구현이 필요합니다.
+
+```java
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class CustomUserDetailsService implements UserDetailsService {
+
+    private final MemberRepository memberRepository;
+
+    @Override
+    public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
+        return memberRepository.findByEmail(email)
+                .map(this::createUserDetails)
+                .orElseThrow(() -> new UsernameNotFoundException("해당하는 유저를 찾을 수 없습니다."));
+    }
+
+    // 해당하는 User 의 데이터가 존재한다면 UserDetails 객체로 만들어서 리턴
+    private UserDetails createUserDetails(User member) {
+        return User.builder()
+                .email(member.getUsername())
+                .password(member.getPassword())
+                .role(member.getRole())
+                .build();
+    }
+}
 ```
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    CustomUserDetailsService
+</figcaption>
 
-### Author Information
+UserDetailsService interface를 구현한 CustomUserDetailsService.class를 통해 loadUserByUsername 메서드를 실제로 구현을 해줘야 인증 과정에서 해당 메서드가 동작하면서 DB와 연동하여 해당 username(email)의 존재 여부가 검증됩니다.
 
-The author information of the post usually does not need to be filled in the _Front Matter_ , they will be obtained from variables `social.name` and the first entry of `social.links` of the configuration file by default. But you can also override it as follows:
+이제 AbstractUserDetailsAuthenticationProvider.class의 retrieveUser() 메서드가 정상적으로 실행되어 DB에 해당 유저가 있는게 확인이 완료되면 코드 아래 부분의 파란색 부분인 additionalAuthenticationChecks() 메서드에서 해당 유저의 비밀번호 일치 여부를 확인합니다.
 
-Adding author information in `_data/authors.yml` (If your website doesn't have this file, don't hesitate to create one).
+![](https://velog.velcdn.com/images/sgn07124/post/01a82a8c-6e3d-491c-a4f1-1bdee2d11322/image.png)
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    additionalAuthenticationChecks
+</figcaption>
 
-```yaml
-<author_id>:
-  name: <full name>
-  twitter: <twitter_of_author>
-  url: <homepage_of_author>
+additionalAuthenticationChecks() 메서드도 DaoAuthenticationProvider.class에 구현되어 있습니다.
+동작 과정을 보면 passwordEncoder.matches(presentedPassword, userDetails.getPassword())를 통해 1번 과정에서 입력한 password와 해당 UserDetails 객체의 비밀번호가 일치하는지 여부를 확인하는 것을 볼 수 있습니다.
+
+![](https://velog.velcdn.com/images/sgn07124/post/cf660602-8ea3-480f-8db4-b086530c2b7c/image.png)
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    AbstractUserDetailsAuthenticationProvider class의 authenticate()
+</figcaption>
+
+이렇게 비밀번호 일치 여부까지 확인했다면 AbstractUserDetailsAuthenticationProvider.class의 authenticate() 메서드는 최종적으로 createSuccessAuthentication() 메서드를 반환합니다. 
+
+![](https://velog.velcdn.com/images/sgn07124/post/4451924d-ada2-4fff-9546-33602d581f88/image.png)
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    UsernamePasswordAuthenticationToken 생성자
+</figcaption>
+
+createSuccessAuthentication() 메서드를 통해 만들어지는 객체가 첫 번째 과정의 UsernamePasswordAuthenticationToken.class 아래에 있는 생성자이며, 이때, authenticate 값이 true가 되며(첫 번째 과정에서는 false였음) 해당 객체는 인증이 완료된 객체가 됩니다. 
+
+![](https://velog.velcdn.com/images/sgn07124/post/e3ca05ff-e2b9-402a-b9f5-29184b5bd9dd/image.png)
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    검증 전과 후 Authenticated 값 비교
+</figcaption>
+로그를 보면 실제 검증 이전(1번 과정) 부분은 Authenticated=false로 되어있지만 하단의 실제 검증 이후(2번 과정 수행) 부분은 Authenticated=true로 변경된 것을 확인할 수 있습니다.
+
+#### 세 번째 과정 - 인증 정보를 기반으로 JWT 토큰이 생성되는 과정
+
+세 번째는 위에서 생성된 authentication 객체를 기반으로 JWT 토큰을 생성합니다.
+
+```java
+@Slf4j
+@Component
+public class JwtTokenProvider {
+
+    private static final String AUTHORITIES_KEY = "auth";
+    private static final String BEARER_TYPE = "Bearer";
+    private static final long ACCESS_TOKEN_EXPIRE_TIME = 30 * 60 * 4 * 1000L;  // 2시간 : 30 * 60 * 4 * 1000L
+    private static final long REFRESH_TOKEN_EXPIRE_TIME = 7 * 24 * 60 * 60 * 1000L;  // 7일
+    private final Key key;
+
+    public JwtTokenProvider(@Value("${jwt.secret}") String secretKey) {
+        byte[] keyBytes = Decoders.BASE64.decode(secretKey);
+        this.key = Keys.hmacShaKeyFor(keyBytes);
+    }
+
+    // 유저 정보를 가지고 AccessToken, RefreshToken 을 생성하는 메서드
+    public TokenDto generateToken(Authentication authentication) {
+        // 권한 가져오기
+        String authorities = authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .collect(Collectors.joining(","));
+
+        long now = (new Date()).getTime();
+        // Access Token 생성
+        Date accessTokenExpiresIn = new Date(now + ACCESS_TOKEN_EXPIRE_TIME);
+        String accessToken = Jwts.builder()
+                .setSubject(authentication.getName())
+                .claim(AUTHORITIES_KEY, authorities)
+                .setExpiration(accessTokenExpiresIn)
+                .signWith(key, SignatureAlgorithm.HS256)
+                .compact();
+
+        // Refresh Token 생성
+        String refreshToken = Jwts.builder()
+                .setExpiration(new Date(now + REFRESH_TOKEN_EXPIRE_TIME))
+                .signWith(key, SignatureAlgorithm.HS256)
+                .compact();
+
+        return TokenDto.builder()
+                .grantType(BEARER_TYPE)
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .refreshTokenExpirationTime(REFRESH_TOKEN_EXPIRE_TIME)
+                .build();
+    }
 ```
-{: file="_data/authors.yml" }
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    JwtTokenProvider
+</figcaption>
 
-And then use `author` to specify a single entry or `authors` to specify multiple entries:
+UserService의 2번 부분에서 Authentication 객체 검증 후, 인증된 객체로 3번 과정의 JwtTokenProvider class의 generateToken() 메서드를 통해 AccessToken과 RefreshToken을 생성합니다.
 
-```yaml
----
-author: <author_id>                     # for single entry
-# or
-authors: [<author1_id>, <author2_id>]   # for multiple entries
----
+일반적으로 AccessToken의 유효시간은 30분 ~ 1시간으로 짧게 설정하고, RefreshToken의 유효시간은 7일 ~ 30일로 길게 설정합니다.
+
+```java
+@Configuration
+@EnableWebSecurity
+@RequiredArgsConstructor
+public class SecurityConfig{
+
+    private final JwtTokenProvider jwtTokenProvider;
+    private final RedisTemplate<String, Object> redisTemplate; // RedisTemplate 주입
+
+    //AuthenticationManager Bean 등록
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration configuration) throws Exception {
+
+        return configuration.getAuthenticationManager();
+    }
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+
+        // csrf disable
+        http
+                .csrf((auth) -> auth.disable());
+
+        //From 로그인 방식 disable
+        http
+                .formLogin((auth) -> auth.disable());
+
+        //http basic 인증 방식 disable
+        http
+                .httpBasic((auth) -> auth.disable());
+
+        //경로별 인가 작업 - hasRole()에 원래 ROLE_A라면 ROLE_는 생략하고 A만 적어줘야 오류가 안뜸..
+        http
+                .authorizeHttpRequests((auth) -> auth
+                        .requestMatchers("/auth/login", "/auth/login-test", "/auth/reissue", "/", "/auth/join-A", "/auth/join-B", "/auth/join-C", "/swagger-ui/**","/v3/api-docs/**", "/swagger-resources/**").permitAll()
+                        .requestMatchers("/admin", "/auth/login-test", "/user/role", "/auth/logout").hasAnyRole("A", "B", "C")
+                        .requestMatchers("/A/info").hasRole("A")
+                        .requestMatchers("/B/info").hasRole("B")
+                        .requestMatchers("/C/info").hasRole("C")
+                        .anyRequest().authenticated());
+
+        http
+                .addFilterBefore(new JwtAuthenticationFilter(jwtTokenProvider, redisTemplate),
+                        UsernamePasswordAuthenticationFilter.class);
+
+        http
+                .sessionManagement((session) -> session
+                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS));
+
+        return http.build();
+    }
+
+    @Bean
+    public BCryptPasswordEncoder bCryptPasswordEncoder() {
+
+        return new BCryptPasswordEncoder();
+    }
+}
 ```
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    SecurityConfig
+</figcaption>
 
-Having said that, the key `author` can also identify multiple entries.
+http.addFilterBefore(new JwtAuthenticationFilter(jwtTokenProvider, redisTemplate), UsernamePasswordAuthenticationFilter.class);를 추가하여 JWT 인증을 위해 직접 구현한 JwtAuthenticationFilter를 UsernamePasswordAuthenticationFilter.class 전에 실행하겠다는 설정입니다.
 
-> The benefit of reading the author information from the file `_data/authors.yml`{: .filepath } is that the page will have the meta tag `twitter:creator`, which enriches the [Twitter Cards](https://developer.twitter.com/en/docs/twitter-for-websites/cards/guides/getting-started#card-and-content-attribution) and is good for SEO.
-{: .prompt-info }
+```java
+/**
+ * JwtAuthenticationFilter는 클라이언트 요청 시 JWT 인증을 하기위해 설치하는 커스텀 필터로, UsernamePasswordAuthenticationFilter 이전에 실행됨
+ * 이 말은 JwtAuthenticationFilter를 통과하면 UsernamePasswordAuthenticationFilter 이후의 필터는 통과한 것으로 본다는 의미이다.
+ * @author rimsong
+ */
+@Slf4j
+@RequiredArgsConstructor
+public class JwtAuthenticationFilter extends GenericFilterBean {
 
-### Post Description
+    private static final String AUTHORIZATION_HEADER = "Authorization";
+    private static final String BEARER_TYPE = "Bearer";
 
-By default, the first words of the post are used to display on the home page for a list of posts, in the _Further Reading_ section, and in the XML of the RSS feed. If you don't want to display the auto-generated description for the post, you can customize it using the `description` field in the _Front Matter_ as follows:
+    private final JwtTokenProvider jwtTokenProvider;
+    private final RedisTemplate redisTemplate;
 
-```yaml
----
-description: Short summary of the post.
----
+
+    @Override
+    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain) throws IOException, ServletException {
+
+        // 1. Request Header 에서 JWT 토큰 추출
+        String token = resolveToken((HttpServletRequest) request);
+
+        // 2. validateToken 으로 토큰 유효성 검사
+        if (token != null && jwtTokenProvider.validateToken(token)) {
+            // Redis에 해당 accessToken logout 여부 확인
+            String isLogout = (String)redisTemplate.opsForValue().get(token);
+            if (ObjectUtils.isEmpty(isLogout)) {
+                Authentication authentication = jwtTokenProvider.getAuthentication(token);
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            }
+        }
+        chain.doFilter(request, response);
+    }
+
+    // Request Header 에서 토큰 정보 추출
+    private String resolveToken(HttpServletRequest request) {
+        String bearerToken = request.getHeader(AUTHORIZATION_HEADER);
+        if (StringUtils.hasText(bearerToken) && bearerToken.startsWith(BEARER_TYPE)) {
+            return bearerToken.substring(7);
+        }
+        return null;
+    }
+
+}
 ```
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    JwtAuthenticationFilter
+</figcaption>
 
-Additionally, the `description` text will also be displayed under the post title on the post's page.
+JwtAuthenticationFilter는 JWT 토큰을 Header에 담아 API 요청이 왔을 때, 해당 토큰을 검사하고, 토큰에서 인증 정보를 가져오기 위해 생성하는 필터입니다. 과정을 보면 resoleveToken() 메서드를 통해 HttpServletRequest 객체에서 Header의 이름이 Authorization인 Header를 가져옵니다. 그리고 해당 토큰이 "Bearer"로 시작되는지 확인 후 "Bearer" + ' '(공백 1자리)를 잘라냅니다. 그런 다음 jwtTokenProvider의 validateToken() 메서드를 사용하여 토큰의 유효성 검사를 진행합니다.
 
-## Table of Contents
-
-By default, the **T**able **o**f **C**ontents (TOC) is displayed on the right panel of the post. If you want to turn it off globally, go to `_config.yml`{: .filepath} and set the value of variable `toc` to `false`. If you want to turn off TOC for a specific post, add the following to the post's [Front Matter](https://jekyllrb.com/docs/front-matter/):
-
-```yaml
----
-toc: false
----
+```java
+// 토큰 정보를 검증하는 메서드
+    public boolean validateToken(String token) {
+        try {
+            Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(token);
+            return true;
+        } catch (io.jsonwebtoken.security.SecurityException | MalformedJwtException e) {
+            log.info("Invalid JWT Token", e);
+        } catch (ExpiredJwtException e) {
+            log.info("Expired JWT Token", e);
+        } catch (UnsupportedJwtException e) {
+            log.info("Unsupported JWT Token", e);
+        } catch (IllegalArgumentException e) {
+            log.info("JWT claims string is empty.", e);
+        }
+        return false;
+    }
 ```
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    JwtTokenProvider의 validateToken()
+</figcaption>
 
-## Comments
+해당 메서드를 통해 토큰을 복호화하며 각 과정을 통해 토큰 서명이 유효하지 않은 경우, 토큰의 형식이 잘못된 경우, 토큰이 만료된 경우, 토큰이 지원하지 않는 형식인 경우, JWT의 claims 문자열이 비어있는 경우 예외를 발생시켜 유효성을 체크하고 토큰 유효성 검사에 이상이 없다면 true를 반환하고 JwtTokenProvider의 getAuthentication() 메서드를 실행합니다.
 
-The global switch of comments is defined by variable `comments.active` in the file `_config.yml`{: .filepath}. After selecting a comment system for this variable, comments will be turned on for all posts.
+```java
+// JWT 토큰을 복호화하여 토큰에 들어있는 정보를 꺼내는 메서드
+    public Authentication getAuthentication(String accessToken) {
+        // 토큰 복호화
+        Claims claims = parseClaims(accessToken);
 
-If you want to close the comment for a specific post, add the following to the **Front Matter** of the post:
+        if (claims.get(AUTHORITIES_KEY) == null) {
+            throw new RuntimeException("권한 정보가 없는 토큰입니다.");
+        }
 
-```yaml
----
-comments: false
----
+        // 클레임에서 권한 정보 가져오기
+        Collection<? extends GrantedAuthority> authorities =
+                Arrays.stream(claims.get(AUTHORITIES_KEY).toString().split(","))
+                        .map(SimpleGrantedAuthority::new)
+                        .collect(Collectors.toList());
+
+        // UserDetails 객체를 만들어서 Authentication 리턴
+        UserDetails principal = new User(claims.getSubject(), "", authorities);  // User : import org.springframework.security.core.userdetails.User;
+        return new UsernamePasswordAuthenticationToken(principal, "", authorities);
+    }
+
+    private Claims parseClaims(String accessToken) {
+        try {
+            return Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(accessToken).getBody();
+        } catch (ExpiredJwtException e) {
+            return e.getClaims();
+        }
+    }
+}
 ```
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    JwtTokenProvider의 getAuthentication()와 parseClaims()
+</figcaption>
 
-## Mathematics
+getAuthentication() 메서드에서는 parseClaims() 메서드로 토큰을 복호화하여 권한 확인 후 권한 정보를 가져와서 해당 정보로 UserDetails 객체를 만들어서 리턴합니다.
 
-We use [**MathJax**][mathjax] to generate mathematics. For website performance reasons, the mathematical feature won't be loaded by default. But it can be enabled by:
+<br>
 
-[mathjax]: https://www.mathjax.org/
+다시 JwtAuthenticationFilter의 jwtTokenProvider.getAuthentication(); 메서드를 통해 생성된 authentication 객체는 SecurityContextHolder의 SecurityContext 안에 저장됩니다. 이후 나머지 filterchain이 도착하고 api 요청에 대한 응답을 합니다.
 
-```yaml
----
-math: true
----
+
+#### 네 번째 과정 - 사용자 email과 RefreshToken을 Redis에 저장하는 과정
+
+```java
+@Configuration
+@RequiredArgsConstructor
+@EnableRedisRepositories
+public class RedisRepositoryConfig {
+
+    /**
+     * 맥에서 Redis homebrew로 설치한 경우 서버 실행 방법
+     * 1. 서버 실행 : brew services start redis
+     * 2. cli 접근 : redis-cli
+     * 2-1. 현재 key 전체 조회 : keys *
+     * 2-2. key에 대한 value 조회(예시) : get RT:Test1@test.com -> value(RT)값 조회
+     * Redis 서버 종료
+     * 1. 서버 종료 : brew services stop redis
+     */
+
+    private final RedisProperties redisProperties;
+
+    @Bean
+    public RedisConnectionFactory redisConnectionFactory() {
+        return new LettuceConnectionFactory(redisProperties.getHost(), redisProperties.getPort());  // properties에 저장한 host, port를 가지고 와서 연결
+    }
+
+    @Bean
+    public RedisTemplate<String, Object> redisTemplate() {
+        RedisTemplate<String, Object> redisTemplate = new RedisTemplate<>();
+        redisTemplate.setConnectionFactory(redisConnectionFactory());
+        redisTemplate.setKeySerializer(new StringRedisSerializer());
+        redisTemplate.setValueSerializer(new StringRedisSerializer());
+        return redisTemplate;
+    }
+}
 ```
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    RedisRepositoryConfig
+</figcaption>
 
-After enabling the mathematical feature, you can add math equations with the following syntax:
+RedisConnectionFactory를 통해 LettuceConnectionFactory를 생성하여 반환합니다. setKeySerializer, setValueSerializer 설정을 통해 redis-cli로 데이터를 직접 확인할 수 있습니다.
 
-- **Block math** should be added with `$$ math $$` with **mandatory** blank lines before and after `$$`
-  - **Inserting equation numbering** should be added with `$$\begin{equation} math \end{equation}$$`
-  - **Referencing equation numbering** should be done with `\label{eq:label_name}` in the equation block and `\eqref{eq:label_name}` inline with text (see example below)
-- **Inline math** (in lines) should be added with `$$ math $$` without any blank line before or after `$$`
-- **Inline math** (in lists) should be added with `\$$ math $$`
+![](https://velog.velcdn.com/images/sgn07124/post/d756ecb4-dc22-409c-91e9-74009385ab81/image.png)
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">
+    redisTemplate.opsForValue().set()
+</figcaption>
 
-```markdown
-<!-- Block math, keep all blank lines -->
+네 번째는 Redis에 사용자 정보와, RefreshToken, expirationTime을 저장하는 용도로 사용하며 이후에 토큰 갱신을 위해 사용하였습니다. 
+Redis는 Key와 Value로 저장이 되며 Key값은 authentication에서 email을 가져와서 저장하고, Value값은 tokenDto에서 RefreshToken을 가져와서 저장합니다. 나머지 인자들로 timeout과 unit을 받습니다. expirationTime(timeout)은 RefreshToken의 만료 시간으로 JwtTokenProvider에서 RefreshToken 생성 시 설정했던 값을 가져와서 저장합니다.
 
-$$
-LaTeX_math_expression
-$$
+<br>
 
-<!-- Equation numbering, keep all blank lines  -->
+#### 로그인 결과
 
-$$
-\begin{equation}
-  LaTeX_math_expression
-  \label{eq:label_name}
-\end{equation}
-$$
+![](https://velog.velcdn.com/images/sgn07124/post/0e6625fb-ce5f-48f4-b95c-b47fadb41d71/image.png)
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:0px">
+    Postman으로 확인
+</figcaption>
 
-Can be referenced as \eqref{eq:label_name}.
+![](https://velog.velcdn.com/images/sgn07124/post/c4fdd9e3-5658-4740-8114-1b99f2c73892/image.png)
+<figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:0px">
+    Redis에 저장된 값 확인
+</figcaption>
 
-<!-- Inline math in lines, NO blank lines -->
 
-"Lorem ipsum dolor sit amet, $$ LaTeX_math_expression $$ consectetur adipiscing elit."
+<br>
+<br>
 
-<!-- Inline math in lists, escape the first `$` -->
 
-1. \$$ LaTeX_math_expression $$
-2. \$$ LaTeX_math_expression $$
-3. \$$ LaTeX_math_expression $$
-```
+### 고민거리
+중복 로그인 시 어떻게 처리해야되는지 고민해봐야 될 것 같다. 
+하나의 계정으로 Computer A에서 로그인을 하면 Cookie에 AT와 RT가 저장되고 Redis에는 로그인한 이메일에 대한 RT가 저장된다.
+Computer A가 로그인 되어있는 상태에서 Computer B가 로그인을 하면 새로 발급된 RT가 Redis에 저장된다.
 
-> Starting with `v7.0.0`, configuration options for **MathJax** have been moved to file `assets/js/data/mathjax.js`{: .filepath }, and you can change the options as needed, such as adding [extensions][mathjax-exts].  
-> If you are building the site via `chirpy-starter`, copy that file from the gem installation directory (check with command `bundle info --path jekyll-theme-chirpy`) to the same directory in your repository.
-{: .prompt-tip }
+이때, Computer A는 AT의 유효시간이 끝나기 전 까지는 api 요청이 가능하지만 유효시간이 끝난 후에 AT 갱신이 불가능하다.(Redis에 저장된 RT가 Computer A가 가지고 있는 RT와 달라졌기 때문).
 
-[mathjax-exts]: https://docs.mathjax.org/en/latest/input/tex/extensions/index.html
+여기서 고민은 A가 로그인 되어있는 상태에서 B가 로그인하면 유효시간이 만료되지 않더라도 A의 접근을 막을 수 있는가?
+: GPT 응답으로 보면 Redis의 key값을 이메일이 아닌 AccessToken을 저장하도록 해야하며, 모든 api 요청을 할 때마다 Redis에 해당 key값과 A가 가지고 있는 AccessToken을 비교하여 일치하는 경우에만 접근을 허용하도록 하면 가능하다. 하지만 서버 부하의 성능 문제와 동시성 문제 등이 발생한다고 한다.
 
-## Mermaid
+그러면 A가 로그인 되어있는 상태에서 B가 로그인하면 이미 로그인되어있는 것이니까 B의 중복 로그인을 막을 수 있는가?
+: 로그인을 시도할 때, 이미 다른 사용자가 로그인되어 있는지를 확인해야 한다. 이를 위해서는 사용자가 로그인한 상태를 어떻게 추적하고 있는지에 따라 구현 방법이 달라질 수 있으며 일반적으로는 세션, 쿠키 또는 데이터베이스를 사용하여 사용자의 로그인 상태를 추적한다.
 
-[**Mermaid**](https://github.com/mermaid-js/mermaid) is a great diagram generation tool. To enable it on your post, add the following to the YAML block:
+뭔가 첫 번째 방법으로 시도하면 될거 같긴 한데 성능 문제가 발생할 것 같아 좀 더 찾아봐야될 것 같다.
 
-```yaml
----
-mermaid: true
----
-```
+<br>
 
-Then you can use it like other markdown languages: surround the graph code with ```` ```mermaid ```` and ```` ``` ````.
 
-## Images
+[출처]
 
-### Caption
+전반적으로 참고 및 공부한 블로그
+: https://wildeveloperetrain.tistory.com/57 <br>
+https://wildeveloperetrain.tistory.com/58 <br>
+https://wildeveloperetrain.tistory.com/59 <br>
 
-Add italics to the next line of an image, then it will become the caption and appear at the bottom of the image:
+이미지
+: https://onejunu.tistory.com/137 <br>
 
-```markdown
-![img-description](/path/to/image)
-_Image Caption_
-```
-{: .nolineno}
+spring security 버전 변경 
+: https://frogand.tistory.com/208 <br>
 
-### Size
-
-In order to prevent the page content layout from shifting when the image is loaded, we should set the width and height for each image.
-
-```markdown
-![Desktop View](/assets/img/sample/mockup.png){: width="700" height="400" }
-```
-{: .nolineno}
-
-> For an SVG, you have to at least specify its _width_, otherwise it won't be rendered.
-{: .prompt-info }
-
-Starting from _Chirpy v5.0.0_, `height` and `width` support abbreviations (`height` → `h`, `width` → `w`). The following example has the same effect as the above:
-
-```markdown
-![Desktop View](/assets/img/sample/mockup.png){: w="700" h="400" }
-```
-{: .nolineno}
-
-### Position
-
-By default, the image is centered, but you can specify the position by using one of the classes `normal`, `left`, and `right`.
-
-> Once the position is specified, the image caption should not be added.
-{: .prompt-warning }
-
-- **Normal position**
-
-  Image will be left aligned in below sample:
-
-  ```markdown
-  ![Desktop View](/assets/img/sample/mockup.png){: .normal }
-  ```
-  {: .nolineno}
-
-- **Float to the left**
-
-  ```markdown
-  ![Desktop View](/assets/img/sample/mockup.png){: .left }
-  ```
-  {: .nolineno}
-
-- **Float to the right**
-
-  ```markdown
-  ![Desktop View](/assets/img/sample/mockup.png){: .right }
-  ```
-  {: .nolineno}
-
-### Dark/Light mode
-
-You can make images follow theme preferences in dark/light mode. This requires you to prepare two images, one for dark mode and one for light mode, and then assign them a specific class (`dark` or `light`):
-
-```markdown
-![Light mode only](/path/to/light-mode.png){: .light }
-![Dark mode only](/path/to/dark-mode.png){: .dark }
-```
-
-### Shadow
-
-The screenshots of the program window can be considered to show the shadow effect:
-
-```markdown
-![Desktop View](/assets/img/sample/mockup.png){: .shadow }
-```
-{: .nolineno}
-
-### CDN URL
-
-If you host the media resources on the CDN, you can save the time of repeatedly writing the CDN URL by assigning the variable `cdn` of `_config.yml`{: .filepath} file:
-
-```yaml
-cdn: https://cdn.com
-```
-{: file='_config.yml' .nolineno}
-
-Once `cdn` is assigned, the CDN URL will be added to the path of all media resources (site avatar, posts' images, audio and video files) starting with `/`.
-
-For instance, when using images:
-
-```markdown
-![The flower](/path/to/flower.png)
-```
-{: .nolineno}
-
-The parsing result will automatically add the CDN prefix `https://cdn.com` before the image path:
-
-```html
-<img src="https://cdn.com/path/to/flower.png" alt="The flower" />
-```
-{: .nolineno }
-
-### Media Subpath
-
-When a post contains many images, it will be a time-consuming task to repeatedly define the path of the media resources. To solve this, we can define this path in the YAML block of the post:
-
-```yml
----
-media_subpath: /img/path/
----
-```
-
-And then, the image source of Markdown can write the file name directly:
-
-```md
-![The flower](flower.png)
-```
-{: .nolineno }
-
-The output will be:
-
-```html
-<img src="/img/path/flower.png" alt="The flower" />
-```
-{: .nolineno }
-
-### Preview Image
-
-If you want to add an image at the top of the post, please provide an image with a resolution of `1200 x 630`. Please note that if the image aspect ratio does not meet `1.91 : 1`, the image will be scaled and cropped.
-
-Knowing these prerequisites, you can start setting the image's attribute:
-
-```yaml
----
-image:
-  path: /path/to/image
-  alt: image alternative text
----
-```
-
-Note that the [`media_subpath`](#media-subpath) can also be passed to the preview image, that is, when it has been set, the attribute `path` only needs the image file name.
-
-For simple use, you can also just use `image` to define the path.
-
-```yml
----
-image: /path/to/image
----
-```
-
-### LQIP
-
-For preview images:
-
-```yaml
----
-image:
-  lqip: /path/to/lqip-file # or base64 URI
----
-```
-
-> You can observe LQIP in the preview image of post [_Text and Typography_](/posts/text-and-typography/).
-
-For normal images:
-
-```markdown
-![Image description](/path/to/image){: lqip="/path/to/lqip-file" }
-```
-{: .nolineno }
-
-## Pinned Posts
-
-You can pin one or more posts to the top of the home page, and the fixed posts are sorted in reverse order according to their release date. Enable by:
-
-```yaml
----
-pin: true
----
-```
-
-## Prompts
-
-There are several types of prompts: `tip`, `info`, `warning`, and `danger`. They can be generated by adding the class `prompt-{type}` to the blockquote. For example, define a prompt of type `info` as follows:
-
-```md
-> Example line for prompt.
-{: .prompt-info }
-```
-{: .nolineno }
-
-## Syntax
-
-### Inline Code
-
-```md
-`inline code part`
-```
-{: .nolineno }
-
-### Filepath Hightlight
-
-```md
-`/path/to/a/file.extend`{: .filepath}
-```
-{: .nolineno }
-
-### Code Block
-
-Markdown symbols ```` ``` ```` can easily create a code block as follows:
-
-````md
-```
-This is a plaintext code snippet.
-```
-````
-
-#### Specifying Language
-
-Using ```` ```{language} ```` you will get a code block with syntax highlight:
-
-````markdown
-```yaml
-key: value
-```
-````
-
-> The Jekyll tag `{% highlight %}` is not compatible with this theme.
-{: .prompt-danger }
-
-#### Line Number
-
-By default, all languages except `plaintext`, `console`, and `terminal` will display line numbers. When you want to hide the line number of a code block, add the class `nolineno` to it:
-
-````markdown
-```shell
-echo 'No more line numbers!'
-```
-{: .nolineno }
-````
-
-#### Specifying the Filename
-
-You may have noticed that the code language will be displayed at the top of the code block. If you want to replace it with the file name, you can add the attribute `file` to achieve this:
-
-````markdown
-```shell
-# content
-```
-{: file="path/to/file" }
-````
-
-#### Liquid Codes
-
-If you want to display the **Liquid** snippet, surround the liquid code with `{% raw %}` and `{% endraw %}`:
-
-````markdown
-{% raw %}
-```liquid
-{% if product.title contains 'Pack' %}
-  This product's title contains the word Pack.
-{% endif %}
-```
-{% endraw %}
-````
-
-Or adding `render_with_liquid: false` (Requires Jekyll 4.0 or higher) to the post's YAML block.
-
-## Videos
-
-### Video Sharing Platform
-
-You can embed a video with the following syntax:
-
-```liquid
-{% include embed/{Platform}.html id='{ID}' %}
-```
-
-Where `Platform` is the lowercase of the platform name, and `ID` is the video ID.
-
-The following table shows how to get the two parameters we need in a given video URL, and you can also know the currently supported video platforms.
-
-| Video URL                                                                                          | Platform   | ID             |
-| -------------------------------------------------------------------------------------------------- | ---------- | :------------- |
-| [https://www.**youtube**.com/watch?v=**H-B46URT4mg**](https://www.youtube.com/watch?v=H-B46URT4mg) | `youtube`  | `H-B46URT4mg`  |
-| [https://www.**twitch**.tv/videos/**1634779211**](https://www.twitch.tv/videos/1634779211)         | `twitch`   | `1634779211`   |
-| [https://www.**bilibili**.com/video/**BV1Q44y1B7Wf**](https://www.bilibili.com/video/BV1Q44y1B7Wf) | `bilibili` | `BV1Q44y1B7Wf` |
-
-### Video File
-
-If you want to embed a video file directly, use the following syntax:
-
-```liquid
-{% include embed/video.html src='{URL}' %}
-```
-
-Where `URL` is an URL to a video file e.g. `/assets/img/sample/video.mp4`.
-
-You can also specify additional attributes for the embedded video file. Here is a full list of attributes allowed.
-
-- `poster='/path/to/poster.png'` - poster image for a video that is shown while video is downloading
-- `title='Text'` - title for a video that appears below the video and looks same as for images
-- `autoplay=true` - video automatically begins to play back as soon as it can
-- `loop=true` - automatically seek back to the start upon reaching the end of the video
-- `muted=true` - audio will be initially silenced
-- `types` - specify the extensions of additional video formats separated by `|`. Ensure these files exist in the same directory as your primary video file.
-
-Consider an example utilizing all of the above:
-
-```liquid
-{%
-  include embed/video.html
-  src='/path/to/video/video.mp4'
-  types='ogg|mov'
-  poster='poster.png'
-  title='Demo video'
-  autoplay=true
-  loop=true
-  muted=true
-%}
-```
-
-> It's not recommended to host video files in `assets` folder as they cannot be cached by PWA and may cause issues.
-> Instead, use CDN to host video files. Alternatively, use a separate folder that is excluded from PWA (see `pwa.deny_paths` setting in `_config.yml`).
-{: .prompt-warning }
-
-## Audios
-
-### Audio File
-
-If you want to embed an audio file directly, use the following syntax:
-
-```liquid
-{% include embed/audio.html src='{URL}' %}
-```
-
-Where `URL` is an URL to an audio file e.g. `/assets/img/sample/audio.mp3`.
-
-You can also specify additional attributes for the embedded audio file. Here is a full list of attributes allowed.
-
-- `title='Text'` - title for an audio that appears below the audio and looks same as for images
-- `types` - specify the extensions of additional audio formats separated by `|`. Ensure these files exist in the same directory as your primary audio file.
-
-Consider an example utilizing all of the above:
-
-```liquid
-{%
-  include embed/audio.html
-  src='/path/to/audio/audio.mp3'
-  types='ogg|wav|aac'
-  title='Demo audio'
-%}
-```
-
-> It's not recommended to host audio files in `assets` folder as they cannot be cached by PWA and may cause issues.
-> Instead, use CDN to host audio files. Alternatively, use a separate folder that is excluded from PWA (see `pwa.deny_paths` setting in `_config.yml`).
-{: .prompt-warning }
-
-## Learn More
-
-For more knowledge about Jekyll posts, visit the [Jekyll Docs: Posts](https://jekyllrb.com/docs/posts/).

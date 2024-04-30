@@ -9,7 +9,7 @@ render_with_liquid: false
 
 로그인 기능은 거의 대부분의 애플리케이션에서 사용하고 있습니다.. 로그인 방식으로는 여러 방식들이 있지만 가장 많이 사용하는 방식을 한 번 사용해보고자 하여 JWT를 사용하여 프로젝트를 진행해보았습니다. 해당 블로그의 로그인 방식(JWT 생성 및 인증) 부분의 내용은 블로그 하단의 출처의 블로그를 공부하며 프로젝트에 적용하였습니다. (로그인 부분의 코드는 spring security + JWT + JPA + Redis로 구성되어 있고 JWT의 AccessToken으로 조회한 회원 이메일과 RefreshToken을 key:value로 redis에 저장하는 방법을 적용했습니다. 이 외의 전체적인 코드는 MySQL과 MongoDB를 사용하였습니다.) 
 
-### Security + JWT의 기본 동작 원리
+### Security + JWT의 기본 동작 원리 
 
 ![](https://velog.velcdn.com/images/sgn07124/post/16387411-6a55-4dca-877b-763132440180/image.png)
 <figcaption style="text-align:center; font-size:15px; color:#808080; margin-top:10px">

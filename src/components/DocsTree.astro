@@ -1,0 +1,70 @@
+---
+import { getCollection } from "astro:content";
+import TreeSection from "./TreeSection.astro";
+import LinkList from "./LinkList.astro";
+import { DOCS_GROUPS } from "../data/docsGroups";
+import { getHue } from "../data/tagColors";
+
+// docsLoader id format: 'docs/subcategory/slug' for docs, 'docs/subcategory' for index pages
+
+// Subcategories that have at least one doc (= migrated)
+const allDocs = await getCollection("docs", ({ id }) => {
+  const parts = id.split("/");
+  return parts[0] === "docs" && parts.length >= 3;
+});
+
+const migratedSubcategories = new Set(
+  allDocs.map((doc) => doc.id.split("/")[1]),
+);
+
+// Subcategories that have an index page: id is exactly 'docs/subcategory' (2 parts)
+const indexPages = await getCollection("docs", ({ id }) => {
+  const parts = id.split("/");
+  return parts.length === 2 && parts[0] === "docs";
+});
+
+const subcategoriesWithIndex = new Set(
+  indexPages.map((p) => p.id.split("/")[1]),
+);
+
+const visibleGroups = DOCS_GROUPS.map((group) => ({
+  ...group,
+  items: group.items.filter((item) => migratedSubcategories.has(item.key)),
+})).filter((group) => group.items.length > 0);
+---
+
+<div class="docs-tree">
+  {
+    visibleGroups.length === 0 ? (
+      <p class="empty-state">문서가 없습니다.</p>
+    ) : (
+      visibleGroups.map((group) => (
+        <TreeSection label={group.label} labelVariant="accent">
+          <LinkList
+            items={group.items.map((item) => ({
+              title: item.label,
+              url: subcategoriesWithIndex.has(item.key)
+                ? `/docs/${item.key}/`
+                : null,
+              hue: getHue(item.label),
+            }))}
+          />
+        </TreeSection>
+      ))
+    )
+  }
+</div>
+
+<style>
+  .docs-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+    padding: 1rem 0;
+  }
+
+  .empty-state {
+    color: var(--sl-color-gray-3);
+    font-size: 0.9rem;
+  }
+</style>

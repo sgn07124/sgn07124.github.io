@@ -5,6 +5,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import starlightBlog from 'starlight-blog'
 import sitemap from '@astrojs/sitemap';
+import remarkGfm from 'remark-gfm';
 
 
 const CONTENT_ROOT = './src/content/docs';
@@ -56,6 +57,9 @@ const lastModMap = buildLastModMap();
 
 // https://astro.build/config
 export default defineConfig({
+	markdown: {
+        remarkPlugins: [remarkGfm],
+    },
     integrations: [
 		starlight({
 			title: 'vlow.log',

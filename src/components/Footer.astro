@@ -1,7 +1,7 @@
 ---
 import type { Props } from "@astrojs/starlight/props";
 import Default from "@astrojs/starlight/components/Footer.astro";
-// import Giscus from "./Giscus.astro";
+import Giscus from "./Giscus.astro";
 import { getHue } from "../data/tagColors";
 
 const { entry } = Astro.props;
@@ -37,7 +37,7 @@ const showDocsTags =
     </div>
   )
 }
-<!-- {showGiscus && <Giscus />} -->
+{showGiscus && <Giscus />}
 
 <style>
   .docs-tags {

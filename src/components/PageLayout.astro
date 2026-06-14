@@ -6,9 +6,9 @@ interface Props {
   description: string;
   activePage?: "about";
   canonical?: string;
-  vlTitle?: string;
-  vlDescription?: string;
-  vlUrl?: string;
+  ogTitle?: string;
+  ogDescription?: string;
+  ogUrl?: string;
   sitemap?: boolean;
 }
 
@@ -17,9 +17,9 @@ const {
   description,
   activePage,
   canonical,
-  vlTitle,
-  vlDescription,
-  vlUrl,
+  ogTitle,
+  ogDescription,
+  ogUrl,
   sitemap = false,
 } = Astro.props;
 ---
@@ -54,17 +54,17 @@ const {
         document.documentElement.setAttribute("data-theme", theme);
       })();
     </script>
-    {vlTitle && <meta property="vl:title" content={vlTitle} />}
+    {ogTitle && <meta property="og:title" content={ogTitle} />}
     {
-      vlDescription && (
-        <meta property="vl:description" content={vlDescription} />
+      ogDescription && (
+        <meta property="og:description" content={ogDescription} />
       )
     }
-    {vlUrl && <meta property="vl:url" content={vlUrl} />}
-    {vlTitle && <meta property="vl:type" content="website" />}
-    {vlTitle && <meta property="vl:site_name" content="vlow.log" />}
-    {vlTitle && <meta property="vl:locale" content="ko_KR" />}
-    {vlTitle && <meta content="https://sgn07124.github.io/" />}
+    {ogUrl && <meta property="og:url" content={ogUrl} />}
+    {ogTitle && <meta property="og:type" content="website" />}
+    {ogTitle && <meta property="og:site_name" content="vlow.log" />}
+    {ogTitle && <meta property="og:locale" content="ko_KR" />}
+    {ogTitle && <meta content="https://sgn07124.github.io/" />}
 
     <script is:inline>
       if (

@@ -72,6 +72,10 @@ export default defineConfig({
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/sgn07124' }],
 			head: [
 				{
+					tag: 'meta',
+					attrs: { name: 'google-site-verification', content: 'RtVGpbYEgs3Mt8cwT4xo2OEiGcmqvcMYVBhc3rZ35CI' },
+				},
+				{
 					tag: 'link',
 					attrs: {
 						rel: 'stylesheet',

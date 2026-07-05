@@ -43,7 +43,7 @@ Server1이 죽으면 대부분의 클라이언트가 데이터가 없는 엉뚱�
 
 ### 해시 공간과 해시 링
 
-![해시 공간 & 해시 링](./image/hash_space_and_ring.png)
+![해시 공간 & 해시 링](./image/hash_space_and_ring.png){width=70% align=center}
 
 >가정
 >  - 해시 함수 f: SHA-1
@@ -53,14 +53,14 @@ Server1이 죽으면 대부분의 클라이언트가 데이터가 없는 엉뚱�
 
 ### 해시 서버
 
-![](./image/hash_server.png)
+![](./image/hash_server.png){width=70% align=center}
 
 서버 IP, 이름 등의 정보를 이용해 각 서버의 hash 값을 구한 후, 해시 링에 배치시킨다.
 그림에서는 4개의 서버를 해시 링 위에 배치한 결과다.
 
 ### 해시 키
 
-![](./image/hash_server_and_key.png)
+![](./image/hash_server_and_key.png){width=70% align=center}
 
 - 여기 사용된 해시 함수는 "해시 키 재배치 문제"에 언급된 함수 F와 다르다.
 - 일관성 있는 해시 알고리즘에선 서버와 해시 키를 균등 분포 해시 함수(uniform distribution hash function)를 사용해서 해시 링에 배치하게 된다.
@@ -83,14 +83,14 @@ Server1이 죽으면 대부분의 클라이언트가 데이터가 없는 엉뚱�
 
 ### 서버 조회
 
-![](./image/get_server_hash.png)
+![](./image/get_server_hash.png){width=70% align=center}
 
 - 어떤 키가 저장되는 서버는, 해당 키의 위치로부터 시계 방향으로 링을 탐색해 나가면서 만나는 첫 번째 서버이다.
 - 위 그림에서 key0은 서버0에 저장되고, key1은 서버1, key2은 서버2, key3은 서버3에 저장된다.
 
 ### 서버 추가
 
-![](./image/add_server_hash.png)
+![](./image/add_server_hash.png){width=70% align=center}
 
 - 서버를 추가하더라도 키 가운데 일부만 재배치하면 된다.
 - 위 그림에서 새로운 서버4가 추가된 뒤에 key0만 재배치 되었다. → 서버가 추가된다고 기존 서버의 해시 링 위의 위치가 바뀌지 않는다.
@@ -98,7 +98,7 @@ Server1이 죽으면 대부분의 클라이언트가 데이터가 없는 엉뚱�
 
 ### 서버 제거
 
-![](./image/del_server_hash.png)
+![](./image/del_server_hash.png){width=70% align=center}
 
 - 하나의 서버가 제거되면 키 가운데 일부만 재배치된다.
 - 위 그림을 보면 서버1이 삭제되었을 때, key1만이 서버2로 재배치됨을 알 수 있다. → 나머지 키에는 영향이 없다.
@@ -114,14 +114,14 @@ Server1이 죽으면 대부분의 클라이언트가 데이터가 없는 엉뚱�
 
 #### 1. 서버가 추가되거나 삭제되는 상황을 감안하면 파티션(partition)의 크기를 균등하게 유지하는 것이 불가능하다.
 
-![](./image/hash_pro_1.png)
+![](./image/hash_pro_1.png){width=70% align=center}
 
 - 파티션은 인접한 서버 사이의 해시 공간인데, 어떤 서버는 작은 해시 공간을 할당받고, 어떤 서버는 큰 해시 공간을 할당받는 상황이 가능하다.
 - 위 그림에서 s1이 삭제되어 s2 파티션이 다른 파티션 대비 거의 2배로 커지는 상황을 보여준다.
 
 #### 2. 키의 균등 분포을 달성하기 어렵다.
 
-![](./image/hash_pro_2.png)
+![](./image/hash_pro_2.png){width=70% align=center}
 
 - 해시 알고리즘이 균등 분포를 보장한다는 전제가 필요하다.
 - 키의 균등 분포 달성에 실패하면, 대부분의 키가 특정 서버로 몰리게 될 수 있다.
@@ -133,7 +133,7 @@ Server1이 죽으면 대부분의 클라이언트가 데이터가 없는 엉뚱�
 
 가상 노드는 실제 서버(노드)를 가리키는 가상의 노드로, 하나의 실제 서버가 해시 링 위에 여러 개의 가상 노드를 가질 수 있다.
 
-![](./image/virtual_node.png)
+![](./image/virtual_node.png){width=100% align=center}
 
 - 배치 방식: 예를 들어 '서버 0'을 링에 배치할 때 하나의 점(s0)만 쓰는 것이 아니라, s0_0, s0_1, s0_2와 같이 이름을 붙여 여러 개의 점으로 링 위에 흩뿌린다.
 - 파티션 관리: 가상 노드가 늘어남에 따라 링이 더 잘게 쪼개지므로, 각 서버는 하나가 아닌 여러 개의 분산된 파티션(영역)을 나누어 관리하게 된다.
@@ -156,7 +156,7 @@ Server1이 죽으면 대부분의 클라이언트가 데이터가 없는 엉뚱�
 
 서버가 추가되거나 제거되면 링 위의 데이터 중 일부는 새로운 서버나 이웃 서버로 재배치되어야 한다.
 
-![](./image/rematch_key.png)
+![](./image/rematch_key.png){width=100% align=center}
 
 #### 서버 추가 시 재배치 범위
 

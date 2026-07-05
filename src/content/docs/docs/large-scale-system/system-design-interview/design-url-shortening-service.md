@@ -30,7 +30,7 @@ description: ""
 
 단축 URL을 받은 서버는 그 URL을 원래 URL로 바꾸어서 301 응답의 Location 헤더에 넣어서 반환한다. 여기서 유의할 것은 301 응답과 302 응답의 차이이다.
 
-![](./image/http_301_redirect_sequence.png)
+![](./image/http_301_redirect_sequence.png){width=70% align=center}
 
 - 301 Permanently Moved
 
@@ -53,7 +53,7 @@ URL 리디렉션을 구현하는 가장 직관적인 방법은 <b>해시 테이�
 
 단축 URL이 www.tinyurl.com/{hashValue} 같은 형태일 때, 중요한 것은 긴 URL을 이 해시 값으로 대응시킬 해시 함수 fx를 찾는 일이 될 것이다.
 
-![](./image/hash_function_shorturl_concept.png)
+![](./image/hash_function_shorturl_concept.png){width=70% align=center}
 
 해시 함수는 다음 요구사항을 만족해야 한다.
 
@@ -74,7 +74,7 @@ URL 리디렉션을 구현하는 가장 직관적인 방법은 <b>해시 테이�
 
 #### 해시 값 길이
 
-![](./image/url_shortener_hashvalue_length.png)
+![](./image/url_shortener_hashvalue_length.png){width=70% align=center}
 
 - hashValue(해시 함수가 계산하는 단축 URL 값)가 사용 가능한 문자의 개수 = 62
   - [0-9, a-z, A-Z]
@@ -91,7 +91,7 @@ URL 리디렉션을 구현하는 가장 직관적인 방법은 <b>해시 테이�
 
 CRC32가 계산한 가장 짧은 해시값조차도 7보다는 길다. 따라서 이를 해결하기 위한 첫 번째 방법은 해시 값에서 처음 7개의 글자만 이용하는 것이다. 하지만 이렇게 하면 해시 결과가 서로 충돌할 확률이 높아지는데 이 문제를 해소하기 위해 아래 그림의 절차를 따른다.
 
-![url shortener hashvalue length](./image/hash_collision_resolution_flowchart.png)
+![url shortener hashvalue length](./image/hash_collision_resolution_flowchart.png){width=70% align=center}
 
 1. longURL을 해시 함수로 돌려 앞 7글자로 shrotURL을 만듦
 2. 그 값이 DB에 이미 있으면(충돌) longURL 뒤에 사전에 정한 문자열을 덧붙여 다시 해시 - 충돌이 없을 때까지 반복
@@ -105,7 +105,7 @@ CRC32가 계산한 가장 짧은 해시값조차도 7보다는 길다. 따라서
 
 62진법을 사용하는 이유는 hashValue에 사용할 수 있는 문자(character) 개수가 62개이기 때문이며, base-62 변환은 아래와 같이 이루어진다.
 
-![](./image/base62_conversion_11157.png)
+![](./image/base62_conversion_11157.png){width=70% align=center}
 
 - 10진수 11157을 62로 계속 나누면서 매번 나머지를 기록: 나머지 59, 55, 2
 - 62진법 문자 대응 규칙(0–9는 숫자, 10–35는 a–z, 36–61은 A–Z)에 따라 59→X, 55→T, 2→2
@@ -117,7 +117,7 @@ CRC32가 계산한 가장 짧은 해시값조차도 7보다는 길다. 따라서
 
 URL 단축기는 시스템의 핵심 컴포넌트이므로, 그 처리 흐름이 논리적으로는 단순해야 하고 기능적으로는 언제나 동작하는 상태를 유지해야 한다. 그림에서는 처리 흐름을 정리한다.
 
-![](./image/url_shortener_detailed_flow_with_example.png)
+![](./image/url_shortener_detailed_flow_with_example.png){width=70% align=center}
 
 처리 흐름을 예시와 함께 정리하면 다음과 같다.
 
@@ -132,7 +132,7 @@ URL 단축기는 시스템의 핵심 컴포넌트이므로, 그 처리 흐름이
 
 그림은 URL 리디렉션(redirection) 메커니즘의 상세한 설계를 그리고 있다. 쓰기보다 읽기를 더 자주하는 시스템이라, <단축 URL, 원래 URL> 의 쌍을 캐시에 저장하여 성능을 높였다.
 
-![](./image/url_redirection_cache_first_pipeline.png)
+![](./image/url_redirection_cache_first_pipeline.png){width=70% align=center}
 
 1. 요청은 사용자 단말 → 로드밸런서 → 웹 서버로 흐르고(①②)
 2. 웹 서버는 캐시(Fast Path)를 먼저 조회(③) — 히트하면 그대로 반환

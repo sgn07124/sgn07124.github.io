@@ -225,7 +225,7 @@ packet-beta
 
 타임스탬프는 시간이 흐름에 따라 점점 큰 값을 갖게 되므로, ID는 시간순으로 정렬 가능하게 될 것이다.
 
-![](./image/timestamp_7.png)
+![](./image/timestamp_7.png){width=70% align=center}
 
 위 그림은 ID 구조를 따르는 값의 이진 표현 형태로부터 UTC 시각을 추출하는 예제로, 이 방법을 역으로 적용하면 어떤 UTC 시각도 상술한 타임스탬프 값으로 변환할 수 있다.
 

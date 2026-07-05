@@ -7,6 +7,7 @@ import starlightBlog from 'starlight-blog'
 import sitemap from '@astrojs/sitemap';
 import remarkGfm from 'remark-gfm';
 import astroMermaid from 'astro-mermaid';
+import rehypeImageAttrs from './src/plugins/rehype-image-attrs.mjs';
 
 const CONTENT_ROOT = './src/content/docs';
 
@@ -59,6 +60,7 @@ const lastModMap = buildLastModMap();
 export default defineConfig({
 	markdown: {
         remarkPlugins: [remarkGfm],
+        rehypePlugins: [rehypeImageAttrs],
     },
     integrations: [
 		astroMermaid(),
